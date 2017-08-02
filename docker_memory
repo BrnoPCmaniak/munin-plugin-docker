@@ -81,11 +81,10 @@ if (defined $ARGV[0] and $ARGV[0] eq "config")
    print "graph_vlabel Bytes\n";
    print "graph_category Docker\n";
    print "graph_info This graph shows docker container memory usage.\n";
-   
+
    foreach(@result)
    {
       print "$$_{'name'}.label $$_{'name'}\n";
-      print "$$_{'name'}.draw LINE2\n";
    }
    exit 0;
 }
