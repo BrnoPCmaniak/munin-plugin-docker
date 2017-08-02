@@ -1,0 +1,242 @@
+#!/usr/bin/env python
+import docker
+import re
+import sys
+import collections
+import os
+
+### Functions ###
+# Only allowed characters for Munin field name
+def makeFieldName(name):
+	return re.sub(r'[^A-Za-z0-9_]', '_', name)
+
+# Prevent line wrap for i/o Munin graphs
+def truncate(string, length = 8, replace = '..'):
+	if len(string) > length:
+		size = (length - len(replace)) / 2
+		newString = string[:size] + replace + string[-size:]
+		return newString
+	else:
+		return string
+
+def readFile(filename):
+	try:
+		with open(filename, 'r') as f:
+			return f.read()
+	except:
+		return False
+
+def getDirSizeRecursive(dir):
+	size = 0
+	for item in os.listdir(dir):
+		itempath = os.path.join(dir, item)
+		if os.path.isfile(itempath):
+			size += os.path.getsize(itempath)
+		elif os.path.isdir(itempath):
+			size += getDirSizeRecursive(itempath)
+	return size
+
+# Get Docker client
+client = docker.from_env()
+
+### Graph Functions ###
+def funcBlockIO():
+	# Config
+	munin.setOption('graph_title', 'Docker container disk throughput')
+	munin.setOption('graph_args', '--base 1024')
+	munin.setOption('graph_vlabel', 'Bytes read (-) / write (+) per second')
+
+	# Fields
+	for container in client.containers.list():
+		name = container.name
+		field = makeFieldName(container.name)
+
+		fieldRead = '%s_read' % (field)
+		fieldWrite = '%s_write' % (field)
+
+		munin.addField(fieldRead, {
+			'label': truncate(name),
+			'min': '0',
+			'type': 'DERIVE',
+			'graph': 'no',
+		})
+		munin.addField(fieldWrite, {
+			'label': truncate(name),
+			'min': '0',
+			'type': 'DERIVE',
+			'negative': fieldRead,
+		})
+
+		# Values
+		if munin.needValues:
+			def getBlockioStat(blockio, name):
+				m = re.search(r'%s (\d+)' % (name), blockio)
+				if m.group(1):
+					return m.group(1)
+				return False
+
+			filename = '/sys/fs/cgroup/blkio/docker/%s/blkio.throttle.io_service_bytes' % (container.id)
+			file = readFile(filename)
+			if file == False:
+				continue
+
+			writeBytes = getBlockioStat(file, 'Write')
+			munin.setFieldValue(fieldWrite, writeBytes)
+
+			readBytes = getBlockioStat(file, 'Read')
+			munin.setFieldValue(fieldRead, readBytes)
+
+def funcNetIO():
+	# Config
+	munin.setOption('graph_title', 'Docker container traffic')
+	munin.setOption('graph_args', '--base 1000')
+	munin.setOption('graph_vlabel', 'Bits in (-) / out (+) per second')
+
+	# Fields
+	for container in client.containers.list():
+		name = truncate(container.name)
+		field = makeFieldName(container.name)
+
+		fieldRx = '%s_rx' % (field)
+		fieldTx = '%s_tx' % (field)
+
+		munin.addField(fieldRx, {
+			'label': name,
+			'min': '0',
+			'type': 'DERIVE',
+			'graph': 'no',
+		})
+		munin.addField(fieldTx, {
+			'label': name,
+			'min': '0',
+			'type': 'DERIVE',
+			'negative': fieldRx,
+		})
+
+		# Get container processes
+		top = container.top()
+		if len(top['Processes']) == 0:
+			continue
+
+		process = top['Processes'][0] # All processes have the same stats
+		pid = process[1]
+
+		file = readFile('/proc/%s/net/dev' % (pid))
+		if file == False:
+			continue
+
+		rxBits = 0
+		txBits = 0
+		for line in file.splitlines():
+			parts = line.split()
+
+			# Invalid lines
+			if len(parts) == 0 or len(parts) < 10:
+				continue
+
+			# No local interfaces
+			if parts[0] == 'lo:' or 'bond' in parts[0]:
+				continue
+
+			if parts[1].isdigit():
+				rxBits += int(parts[1]) * 8
+			if parts[9].isdigit():
+				txBits += int(parts[9]) * 8
+
+		munin.setFieldValue(fieldRx, rxBits)
+		munin.setFieldValue(fieldTx, txBits)
+
+def funcVolumes():
+	# Config
+	munin.setOption('graph_title', 'Docker volume size')
+	munin.setOption('graph_args', '--base 1024')
+	munin.setOption('graph_vlabel', 'Bytes')
+
+	# Fields
+	for volume in client.volumes.list():
+		# Only handle named volumes
+		if re.match(r'^[a-f0-9]{64}$', volume.id):
+			continue
+
+		field = makeFieldName(volume.name)
+		munin.addField(field, {
+			'label': field,
+		})
+
+		# Values
+		if munin.needValues:
+			size = 0
+			if 'Mountpoint' in volume.attrs:
+				try:
+					size = getDirSizeRecursive(volume.attrs['Mountpoint'])
+				except:
+					pass
+			munin.setFieldValue(field, size)
+
+### Simple Munin ###
+class SimpleMunin:
+	def __init__(self):
+		self.fields = collections.OrderedDict()
+		self.options = {}
+		self.functions = {}
+		self.needValues = True if len(sys.argv) <= 1 else False
+
+	def setOption(self, key, val):
+		if val is not None:
+			self.options[key] = val
+		elif key in self.options:
+			del self.options[key]
+
+	def addField(self, id, config, val = None):
+		self.fields[id] = {
+			'config': config,
+			'value': None
+		}
+		if val is not None:
+			self.setFieldValue(id, val)
+
+	def setFieldValue(self, id, val):
+		self.fields[id]['value'] = val
+
+	def registerFunc(self, name, func):
+		self.functions[name] = func
+
+	def run(self):
+		pluginName = list(os.path.split(sys.argv[0]))[1]
+		graphName = pluginName[pluginName.index('_')+1:]
+		if graphName in self.functions:
+			self.functions[graphName]()
+		else:
+			sys.exit(1)
+
+		# Print config
+		if len(sys.argv) > 1 and sys.argv[1] == 'config':
+			for option in self.options:
+				print '%s %s' % (option, self.options[option])
+
+			for id in self.fields:
+				field = self.fields[id]
+				for key in field['config']:
+					value = field['config'][key]
+					print '%s.%s %s' % (id, key, value)
+			sys.exit(0)
+
+		# Print values
+		for id in self.fields:
+			if self.fields[id]['value'] is not None:
+				# We want to print ints without and floats with decimals, because DERIVE exspects
+				# integers.
+				print ('%s.value ' + str(self.fields[id]['value'])) % (id)
+
+### Main Program ###
+munin = SimpleMunin()
+
+# Default options
+munin.setOption('graph_category', 'Docker')
+
+# Define graphs
+munin.registerFunc('blockio', funcBlockIO)
+munin.registerFunc('netio', funcNetIO)
+munin.registerFunc('volumes', funcVolumes)
+
+munin.run()
