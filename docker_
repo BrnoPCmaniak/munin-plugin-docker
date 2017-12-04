@@ -40,6 +40,62 @@ def getDirSizeRecursive(dir):
 client = docker.from_env()
 
 ### Graph Functions ###
+def funcCpu():
+	# Config
+	munin.setOption('graph_title', 'Docker container CPU usage')
+	munin.setOption('graph_args', '--base 1000 -r --lower-limit 0')
+	munin.setOption('graph_vlabel', '%')
+	munin.setOption('graph_scale', 'no')
+	munin.setOption('graph_period', 'second')
+
+	# Fields
+	for container in client.containers.list():
+		name = container.name
+		field = makeFieldName(name)
+
+		nanoSecondsInSecond = 1000000000
+		munin.addField(field, {
+			'label': name,
+			'min': 0,
+			'type': 'DERIVE',
+			'cdef': '%s,%d,/' % (field, nanoSecondsInSecond),
+		})
+
+		# Values
+		if munin.needValues:
+			filename = '/sys/fs/cgroup/cpuacct/docker/%s/cpuacct.usage' % (container.id)
+			file = readFile(filename)
+			if file == False:
+				continue
+
+			usage = long(file) * 100 # To percent
+			munin.setFieldValue(field, usage)
+
+def funcMemory():
+	# Config
+	munin.setOption('graph_title', 'Docker container memory usage')
+	munin.setOption('graph_args', '--base 1024')
+	munin.setOption('graph_vlabel', 'Bytes')
+
+	# Fields
+	for container in client.containers.list():
+		name = container.name
+		field = makeFieldName(name)
+
+		munin.addField(field, {
+			'label': name,
+		})
+
+		# Values
+		if munin.needValues:
+			filename = '/sys/fs/cgroup/memory/docker/%s/memory.usage_in_bytes' % (container.id)
+			file = readFile(filename)
+			if file == False:
+				continue
+
+			bytes = long(file)
+			munin.setFieldValue(field, bytes)
+
 def funcBlockIO():
 	# Config
 	munin.setOption('graph_title', 'Docker container disk throughput')
@@ -160,7 +216,7 @@ def funcVolumes():
 
 		field = makeFieldName(volume.name)
 		munin.addField(field, {
-			'label': field,
+			'label': volume.name,
 		})
 
 		# Values
@@ -235,6 +291,8 @@ munin = SimpleMunin()
 munin.setOption('graph_category', 'Docker')
 
 # Define graphs
+munin.registerFunc('memory', funcMemory)
+munin.registerFunc('cpu', funcCpu)
 munin.registerFunc('blockio', funcBlockIO)
 munin.registerFunc('netio', funcNetIO)
 munin.registerFunc('volumes', funcVolumes)
