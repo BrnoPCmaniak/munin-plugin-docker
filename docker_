@@ -127,9 +127,9 @@ def funcBlockIO():
 		if munin.needValues:
 			def getBlockioStat(blockio, name):
 				m = re.search(r'%s (\d+)' % (name), blockio)
-				if m.group(1):
+				if m:
 					return m.group(1)
-				return False
+				return 0
 
 			filename = '/sys/fs/cgroup/blkio/docker/%s/blkio.throttle.io_service_bytes' % (container.id)
 			file = readFile(filename)
