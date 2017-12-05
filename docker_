@@ -5,6 +5,13 @@ import sys
 import collections
 import os
 
+# Constants
+DOCKER_COMPOSE_LABEL = 'com.docker.compose.project'
+NANO_SECONDS_IN_SECOND = 1000000000
+
+# Get Docker client
+client = docker.from_env()
+
 ### Functions ###
 # Only allowed characters for Munin field name
 def makeFieldName(name):
@@ -36,8 +43,50 @@ def getDirSizeRecursive(dir):
 			size += getDirSizeRecursive(itempath)
 	return size
 
-# Get Docker client
-client = docker.from_env()
+def getComposeContainers():
+	projects = {}
+	for container in client.containers.list():
+		if not DOCKER_COMPOSE_LABEL in container.labels:
+			continue
+
+		project = container.labels[DOCKER_COMPOSE_LABEL]
+		if not project in projects:
+			projects[project] = []
+
+		projects[project].append(container)
+	return projects
+
+## Obtain Stats Functions ##
+def getContainerCpu(containerId):
+	filename = '/sys/fs/cgroup/cpuacct/docker/%s/cpuacct.usage' % (containerId)
+	file = readFile(filename)
+	if file == False:
+		return False
+
+	usage = long(file) * 100 # To percent
+	return usage
+
+def getContainerMemory(containerId, includeCache):
+	# Get total memory
+	filename = '/sys/fs/cgroup/memory/docker/%s/memory.usage_in_bytes' % (containerId)
+	file = readFile(filename)
+	if file == False:
+		return False
+	bytes = long(file)
+
+	if not includeCache:
+		# Substract cache
+		filename = '/sys/fs/cgroup/memory/docker/%s/memory.stat' % (containerId)
+		file = readFile(filename)
+		if file == False:
+			return False
+
+		m = re.search(r'^cache (\d+)$', file, flags = re.MULTILINE)
+		if m:
+			cacheBytes = long(m.group(1))
+			bytes = bytes - cacheBytes
+
+	return bytes
 
 ### Graph Functions ###
 def funcCpu():
@@ -53,27 +102,35 @@ def funcCpu():
 		name = container.name
 		field = makeFieldName(name)
 
-		nanoSecondsInSecond = 1000000000
 		munin.addField(field, {
 			'label': name,
 			'min': 0,
 			'type': 'DERIVE',
-			'cdef': '%s,%d,/' % (field, nanoSecondsInSecond),
+			'cdef': '%s,%d,/' % (field, NANO_SECONDS_IN_SECOND),
 		})
 
 		# Values
 		if munin.needValues:
-			filename = '/sys/fs/cgroup/cpuacct/docker/%s/cpuacct.usage' % (container.id)
-			file = readFile(filename)
-			if file == False:
+			usage = getContainerCpu(container.id)
+			if usage == False:
 				continue
 
-			usage = long(file) * 100 # To percent
 			munin.setFieldValue(field, usage)
 
-def funcMemory():
+def funcMemoryWithCache():
+	return funcMemory(True)
+
+def funcMemoryNoCache():
+	return funcMemory(False)
+
+def funcMemory(includeCache):
 	# Config
-	munin.setOption('graph_title', 'Docker container memory usage')
+	if includeCache:
+		title = 'Docker container memory usage'
+	else:
+		title = 'Docker container memory usage (no cache)'
+
+	munin.setOption('graph_title', title)
 	munin.setOption('graph_args', '--base 1024')
 	munin.setOption('graph_vlabel', 'Bytes')
 
@@ -88,12 +145,10 @@ def funcMemory():
 
 		# Values
 		if munin.needValues:
-			filename = '/sys/fs/cgroup/memory/docker/%s/memory.usage_in_bytes' % (container.id)
-			file = readFile(filename)
-			if file == False:
+			bytes = getContainerMemory(container.id, includeCache)
+			if bytes == False:
 				continue
 
-			bytes = long(file)
 			munin.setFieldValue(field, bytes)
 
 def funcBlockIO():
@@ -229,6 +284,72 @@ def funcVolumes():
 					pass
 			munin.setFieldValue(field, size)
 
+def funcComposeCpu():
+	# Config
+	munin.setOption('graph_title', 'Docker compose CPU usage')
+	munin.setOption('graph_args', '--base 1000 -r --lower-limit 0')
+	munin.setOption('graph_vlabel', '%')
+	munin.setOption('graph_scale', 'no')
+	munin.setOption('graph_period', 'second')
+
+	# Fields
+	projects = getComposeContainers()
+	for project in projects:
+		field = makeFieldName(project)
+		munin.addField(field, {
+			'label': project,
+			'min': 0,
+			'type': 'DERIVE',
+			'cdef': '%s,%d,/' % (field, NANO_SECONDS_IN_SECOND),
+		})
+
+		# Values
+		if munin.needValues:
+			totalUsage = 0
+			for container in projects[project]:
+				usage = getContainerCpu(container.id)
+				if usage == False:
+					continue
+
+				totalUsage = totalUsage + usage
+			munin.setFieldValue(field, totalUsage)
+
+def funcComposeMemoryWithCache():
+	return funcComposeMemory(True)
+
+def funcComposeMemoryNoCache():
+	return funcComposeMemory(False)
+
+def funcComposeMemory(includeCache):
+	# Config
+	if includeCache:
+		title = 'Docker compose memory usage'
+	else:
+		title = 'Docker compose memory usage (no cache)'
+
+	munin.setOption('graph_title', title)
+	munin.setOption('graph_args', '--base 1024')
+	munin.setOption('graph_vlabel', 'Bytes')
+
+	# Fields
+	projects = getComposeContainers()
+	for project in projects:
+		field = makeFieldName(project)
+		munin.addField(field, {
+			'label': project,
+		})
+
+		# Values
+		if munin.needValues:
+			totalBytes = 0
+			for container in projects[project]:
+				bytes = getContainerMemory(container.id, includeCache)
+				if bytes == False:
+					continue
+
+				totalBytes = totalBytes + bytes
+			munin.setFieldValue(field, totalBytes)
+
 ### Simple Munin ###
 class SimpleMunin:
 	def __init__(self):
@@ -291,10 +412,16 @@ munin = SimpleMunin()
 munin.setOption('graph_category', 'Docker')
 
 # Define graphs
-munin.registerFunc('memory', funcMemory)
 munin.registerFunc('cpu', funcCpu)
+munin.registerFunc('memory', funcMemoryWithCache)
+munin.registerFunc('memory_nocache', funcMemoryNoCache)
 munin.registerFunc('blockio', funcBlockIO)
 munin.registerFunc('netio', funcNetIO)
+
+munin.registerFunc('compose_cpu', funcComposeCpu)
+munin.registerFunc('compose_memory', funcComposeMemoryWithCache)
+munin.registerFunc('compose_memory_nocache', funcComposeMemoryNoCache)
+
 munin.registerFunc('volumes', funcVolumes)
 
 munin.run()

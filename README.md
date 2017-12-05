@@ -7,10 +7,17 @@
 
   ```
   cd /etc/munin/plugins/
+
   ln -s /usr/share/munin/plugins/docker_ docker_cpu
   ln -s /usr/share/munin/plugins/docker_ docker_memory
+  ln -s /usr/share/munin/plugins/docker_ docker_memory_nocache
   ln -s /usr/share/munin/plugins/docker_ docker_blockio
   ln -s /usr/share/munin/plugins/docker_ docker_netio
+
+  ln -s /usr/share/munin/plugins/docker_ docker_compose_cpu
+  ln -s /usr/share/munin/plugins/docker_ docker_compose_memory
+  ln -s /usr/share/munin/plugins/docker_ docker_compose_memory_nocache
+
   ln -s /usr/share/munin/plugins/docker_ docker_volumes
   ```
 5. Give root privilege to the docker plugin. Root privilege is required for munin to execute the Docker command.
