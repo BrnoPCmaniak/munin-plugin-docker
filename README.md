@@ -17,6 +17,8 @@
   ln -s /usr/share/munin/plugins/docker_ docker_compose_cpu
   ln -s /usr/share/munin/plugins/docker_ docker_compose_memory
   ln -s /usr/share/munin/plugins/docker_ docker_compose_memory_nocache
+  ln -s /usr/share/munin/plugins/docker_ docker_compose_blockio
+  ln -s /usr/share/munin/plugins/docker_ docker_compose_netio
 
   ln -s /usr/share/munin/plugins/docker_ docker_volumes
   ```

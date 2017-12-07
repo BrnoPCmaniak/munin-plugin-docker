@@ -84,9 +84,64 @@ def getContainerMemory(containerId, includeCache):
 		m = re.search(r'^cache (\d+)$', file, flags = re.MULTILINE)
 		if m:
 			cacheBytes = long(m.group(1))
-			bytes = bytes - cacheBytes
+			bytes -= cacheBytes
 
 	return bytes
+
+def getContainerBlockIO(containerId):
+	def getBlockIOStat(file, name):
+		m = re.search(r'%s (\d+)$' % (name), file, flags = re.MULTILINE)
+		if m:
+			return long(m.group(1))
+		return 0
+
+	filename = '/sys/fs/cgroup/blkio/docker/%s/blkio.throttle.io_service_bytes' % (containerId)
+	file = readFile(filename)
+	if file == False:
+		return False
+
+	return {
+		'write': getBlockIOStat(file, 'Write'),
+		'read': getBlockIOStat(file, 'Read'),
+	}
+
+def getContainerNetIO(container):
+	def getNetIOStat(field):
+		if not field.isdigit():
+			return 0
+		return long(field) * 8
+
+	# Get container processes
+	top = container.top()
+	if len(top['Processes']) == 0:
+		return False
+
+	process = top['Processes'][0] # All processes have the same stats
+	pid = process[1]
+
+	file = readFile('/proc/%s/net/dev' % (pid))
+	if file == False:
+		return False
+
+	netio = {
+		'rxBits': 0,
+		'txBits': 0,
+	}
+	for line in file.splitlines():
+		parts = line.split()
+
+		# Invalid lines
+		if len(parts) == 0 or len(parts) < 10:
+			continue
+
+		# No local interfaces
+		if parts[0] == 'lo:' or 'bond' in parts[0]:
+			continue
+
+		netio['rxBits'] += getNetIOStat(parts[1])
+		netio['txBits'] += getNetIOStat(parts[9])
+
+	return netio
 
 ### Graph Functions ###
 def funcCpu():
@@ -161,7 +216,6 @@ def funcBlockIO():
 	for container in client.containers.list():
 		name = container.name
 		field = makeFieldName(container.name)
-
 		fieldRead = '%s_read' % (field)
 		fieldWrite = '%s_write' % (field)
 
@@ -180,22 +234,12 @@ def funcBlockIO():
 
 		# Values
 		if munin.needValues:
-			def getBlockioStat(blockio, name):
-				m = re.search(r'%s (\d+)' % (name), blockio)
-				if m:
-					return m.group(1)
-				return 0
-
-			filename = '/sys/fs/cgroup/blkio/docker/%s/blkio.throttle.io_service_bytes' % (container.id)
-			file = readFile(filename)
-			if file == False:
+			blockio = getContainerBlockIO(container.id)
+			if blockio == False:
 				continue
 
-			writeBytes = getBlockioStat(file, 'Write')
-			munin.setFieldValue(fieldWrite, writeBytes)
-
-			readBytes = getBlockioStat(file, 'Read')
-			munin.setFieldValue(fieldRead, readBytes)
+			munin.setFieldValue(fieldWrite, blockio['write'])
+			munin.setFieldValue(fieldRead, blockio['read'])
 
 def funcNetIO():
 	# Config
@@ -207,7 +251,6 @@ def funcNetIO():
 	for container in client.containers.list():
 		name = truncate(container.name)
 		field = makeFieldName(container.name)
-
 		fieldRx = '%s_rx' % (field)
 		fieldTx = '%s_tx' % (field)
 
@@ -224,38 +267,14 @@ def funcNetIO():
 			'negative': fieldRx,
 		})
 
-		# Get container processes
-		top = container.top()
-		if len(top['Processes']) == 0:
-			continue
-
-		process = top['Processes'][0] # All processes have the same stats
-		pid = process[1]
-
-		file = readFile('/proc/%s/net/dev' % (pid))
-		if file == False:
-			continue
-
-		rxBits = 0
-		txBits = 0
-		for line in file.splitlines():
-			parts = line.split()
-
-			# Invalid lines
-			if len(parts) == 0 or len(parts) < 10:
+		# Values
+		if munin.needValues:
+			netio = getContainerNetIO(container)
+			if netio == False:
 				continue
 
-			# No local interfaces
-			if parts[0] == 'lo:' or 'bond' in parts[0]:
-				continue
-
-			if parts[1].isdigit():
-				rxBits += int(parts[1]) * 8
-			if parts[9].isdigit():
-				txBits += int(parts[9]) * 8
-
-		munin.setFieldValue(fieldRx, rxBits)
-		munin.setFieldValue(fieldTx, txBits)
+			munin.setFieldValue(fieldRx, netio['rxBits'])
+			munin.setFieldValue(fieldTx, netio['txBits'])
 
 def funcVolumes():
 	# Config
@@ -311,7 +330,7 @@ def funcComposeCpu():
 				if usage == False:
 					continue
 
-				totalUsage = totalUsage + usage
+				totalUsage += usage
 			munin.setFieldValue(field, totalUsage)
 
 def funcComposeMemoryWithCache():
@@ -347,8 +366,90 @@ def funcComposeMemory(includeCache):
 				if bytes == False:
 					continue
 
-				totalBytes = totalBytes + bytes
+				totalBytes += bytes
 			munin.setFieldValue(field, totalBytes)
+
+def funcComposeBlockIO():
+	# Config
+	munin.setOption('graph_title', 'Docker compose disk throughput')
+	munin.setOption('graph_args', '--base 1024')
+	munin.setOption('graph_vlabel', 'Bytes read (-) / write (+) per second')
+
+	# Fields
+	projects = getComposeContainers()
+	for project in projects:
+		field = makeFieldName(project)
+		fieldRead = '%s_read' % (field)
+		fieldWrite = '%s_write' % (field)
+
+		munin.addField(fieldRead, {
+			'label': truncate(project),
+			'min': '0',
+			'type': 'DERIVE',
+			'graph': 'no',
+		})
+		munin.addField(fieldWrite, {
+			'label': truncate(project),
+			'min': '0',
+			'type': 'DERIVE',
+			'negative': fieldRead,
+		})
+
+		# Values
+		if munin.needValues:
+			writeBytes = 0
+			readBytes = 0
+			for container in projects[project]:
+				blockio = getContainerBlockIO(container.id)
+				if blockio == False:
+					continue
+
+				writeBytes += blockio['write']
+				readBytes += blockio['read']
+
+			munin.setFieldValue(fieldWrite, writeBytes)
+			munin.setFieldValue(fieldRead, readBytes)
+
+def funcComposeNetIO():
+	# Config
+	munin.setOption('graph_title', 'Docker compose traffic')
+	munin.setOption('graph_args', '--base 1000')
+	munin.setOption('graph_vlabel', 'Bits in (-) / out (+) per second')
+
+	# Fields
+	projects = getComposeContainers()
+	for project in projects:
+		field = makeFieldName(project)
+		fieldRx = '%s_rx' % (field)
+		fieldTx = '%s_tx' % (field)
+
+		munin.addField(fieldRx, {
+			'label': truncate(project),
+			'min': '0',
+			'type': 'DERIVE',
+			'graph': 'no',
+		})
+		munin.addField(fieldTx, {
+			'label': truncate(project),
+			'min': '0',
+			'type': 'DERIVE',
+			'negative': fieldRx,
+		})
+
+		# Values
+		if munin.needValues:
+			rxBits = 0
+			txBits = 0
+			for container in projects[project]:
+				netio = getContainerNetIO(container)
+				if netio == False:
+					continue
+
+				rxBits += netio['rxBits']
+				txBits += netio['txBits']
+
+			munin.setFieldValue(fieldRx, rxBits)
+			munin.setFieldValue(fieldTx, txBits)
 
 ### Simple Munin ###
 class SimpleMunin:
@@ -421,6 +522,8 @@ munin.registerFunc('netio', funcNetIO)
 munin.registerFunc('compose_cpu', funcComposeCpu)
 munin.registerFunc('compose_memory', funcComposeMemoryWithCache)
 munin.registerFunc('compose_memory_nocache', funcComposeMemoryNoCache)
+munin.registerFunc('compose_blockio', funcComposeBlockIO)
+munin.registerFunc('compose_netio', funcComposeNetIO)
 
 munin.registerFunc('volumes', funcVolumes)
 
