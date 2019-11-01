@@ -23,10 +23,23 @@
   ln -s /usr/share/munin/plugins/docker_ docker_volumes
   ```
 5. Give root privilege to the docker plugin. Root privilege is required for munin to execute the Docker command.
-  1. Create a new file named "docker" inside the folder /etc/munin/plugin-conf.d/
+  1. Create a new file named "docker" inside the folder `/etc/munin/plugin-conf.d/`
   2. Insert the following content in the new docker file:
   ```
   [docker_*]
   user root
   ```
 6. Restart the munin-node service.
+
+### Extra options: ###
+
+#### Truncate ####
+You can also enable or disable name truncation for blockio and netio graphs by adding a line into the `/etc/munin/plugin-conf.d/docker` file.
+
+```
+[docker_*]
+user root
+env.truncate yes
+```
+
+This will lead into more readable graphs as the values will not be line wrapped under if the names of the containers are longer this comes with a cost of less readibility for the names of the containers.

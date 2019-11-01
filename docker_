@@ -19,7 +19,7 @@ def makeFieldName(name):
 
 # Prevent line wrap for i/o Munin graphs
 def truncate(string, length = 8, replace = '..'):
-	if len(string) > length:
+	if len(string) > length and os.environ.get("truncate", "no").lower() == "yes":
 		size = (length - len(replace)) // 2
 		newString = string[:size] + replace + string[-size:]
 		return newString
