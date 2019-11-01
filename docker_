@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Munin magic markers
+#%# family=auto
+#%# capabilities=autoconf suggest
 import docker
 import re
 import sys
@@ -498,6 +501,18 @@ class SimpleMunin:
 		self.functions[name] = func
 
 	def run(self):
+		if len(sys.argv) > 1:
+			if sys.argv[1] == 'autoconf':
+				"""
+				We already loaded the docker client so
+				we can assume plugin will work as expected.
+				"""
+				print('yes')
+				sys.exit(0)
+			elif sys.argv[1] == 'suggest':
+				for i in self.functions.keys():
+					print(i)
+				sys.exit(0)
 		pluginName = list(os.path.split(sys.argv[0]))[1]
 		graphName = pluginName[pluginName.index('_')+1:]
 		if graphName in self.functions:
