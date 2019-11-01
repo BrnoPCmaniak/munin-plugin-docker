@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import docker
 import re
 import sys
@@ -20,7 +20,7 @@ def makeFieldName(name):
 # Prevent line wrap for i/o Munin graphs
 def truncate(string, length = 8, replace = '..'):
 	if len(string) > length:
-		size = (length - len(replace)) / 2
+		size = (length - len(replace)) // 2
 		newString = string[:size] + replace + string[-size:]
 		return newString
 	else:
@@ -63,7 +63,7 @@ def getContainerCpu(containerId):
 	if file == False:
 		return False
 
-	usage = long(file) * 100 # To percent
+	usage = int(file) * 100 # To percent
 	return usage
 
 def getContainerMemory(containerId, includeCache):
@@ -72,7 +72,7 @@ def getContainerMemory(containerId, includeCache):
 	file = readFile(filename)
 	if file == False:
 		return False
-	bytes = long(file)
+	bytes = int(file)
 
 	if not includeCache:
 		# Substract cache
@@ -83,7 +83,7 @@ def getContainerMemory(containerId, includeCache):
 
 		m = re.search(r'^cache (\d+)$', file, flags = re.MULTILINE)
 		if m:
-			cacheBytes = long(m.group(1))
+			cacheBytes = int(m.group(1))
 			bytes -= cacheBytes
 
 	return bytes
@@ -92,7 +92,7 @@ def getContainerBlockIO(containerId):
 	def getBlockIOStat(file, name):
 		m = re.search(r'%s (\d+)$' % (name), file, flags = re.MULTILINE)
 		if m:
-			return long(m.group(1))
+			return int(m.group(1))
 		return 0
 
 	filename = '/sys/fs/cgroup/blkio/docker/%s/blkio.throttle.io_service_bytes' % (containerId)
@@ -109,7 +109,7 @@ def getContainerNetIO(container):
 	def getNetIOStat(field):
 		if not field.isdigit():
 			return 0
-		return long(field) * 8
+		return int(field) * 8
 
 	# Get container processes
 	top = container.top()
@@ -490,13 +490,13 @@ class SimpleMunin:
 		# Print config
 		if len(sys.argv) > 1 and sys.argv[1] == 'config':
 			for option in self.options:
-				print '%s %s' % (option, self.options[option])
+				print('%s %s' % (option, self.options[option]))
 
 			for id in self.fields:
 				field = self.fields[id]
 				for key in field['config']:
 					value = field['config'][key]
-					print '%s.%s %s' % (id, key, value)
+					print('%s.%s %s' % (id, key, value))
 			sys.exit(0)
 
 		# Print values
@@ -504,7 +504,7 @@ class SimpleMunin:
 			if self.fields[id]['value'] is not None:
 				# We want to print ints without and floats with decimals, because DERIVE exspects
 				# integers.
-				print ('%s.value ' + str(self.fields[id]['value'])) % (id)
+				print(('%s.value ' + str(self.fields[id]['value'])) % (id))
 
 ### Main Program ###
 munin = SimpleMunin()
