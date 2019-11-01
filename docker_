@@ -151,6 +151,8 @@ def funcCpu():
 	munin.setOption('graph_vlabel', '%')
 	munin.setOption('graph_scale', 'no')
 	munin.setOption('graph_period', 'second')
+	if os.environ.get('graph_total', 'no').lower() == "yes":
+		munin.setOption('graph_total', 'Total')
 
 	# Fields
 	for container in client.containers.list():
@@ -188,6 +190,8 @@ def funcMemory(includeCache):
 	munin.setOption('graph_title', title)
 	munin.setOption('graph_args', '--base 1024')
 	munin.setOption('graph_vlabel', 'Bytes')
+	if os.environ.get('graph_total', 'no').lower() == "yes":
+		munin.setOption('graph_total', 'Total')
 
 	# Fields
 	for container in client.containers.list():
@@ -211,6 +215,8 @@ def funcBlockIO():
 	munin.setOption('graph_title', 'Docker container disk throughput')
 	munin.setOption('graph_args', '--base 1024')
 	munin.setOption('graph_vlabel', 'Bytes read (-) / write (+) per second')
+	if os.environ.get('graph_total', 'no').lower() == "yes":
+		munin.setOption('graph_total', 'Total')
 
 	# Fields
 	for container in client.containers.list():
@@ -246,6 +252,8 @@ def funcNetIO():
 	munin.setOption('graph_title', 'Docker container traffic')
 	munin.setOption('graph_args', '--base 1000')
 	munin.setOption('graph_vlabel', 'Bits in (-) / out (+) per second')
+	if os.environ.get('graph_total', 'no').lower() == "yes":
+		munin.setOption('graph_total', 'Total')
 
 	# Fields
 	for container in client.containers.list():
@@ -281,6 +289,8 @@ def funcVolumes():
 	munin.setOption('graph_title', 'Docker volume size')
 	munin.setOption('graph_args', '--base 1024')
 	munin.setOption('graph_vlabel', 'Bytes')
+	if os.environ.get('graph_total', 'no').lower() == "yes":
+		munin.setOption('graph_total', 'Total')
 
 	# Fields
 	for volume in client.volumes.list():
@@ -310,6 +320,8 @@ def funcComposeCpu():
 	munin.setOption('graph_vlabel', '%')
 	munin.setOption('graph_scale', 'no')
 	munin.setOption('graph_period', 'second')
+	if os.environ.get('graph_total', 'no').lower() == "yes":
+		munin.setOption('graph_total', 'Total')
 
 	# Fields
 	projects = getComposeContainers()
@@ -349,6 +361,8 @@ def funcComposeMemory(includeCache):
 	munin.setOption('graph_title', title)
 	munin.setOption('graph_args', '--base 1024')
 	munin.setOption('graph_vlabel', 'Bytes')
+	if os.environ.get('graph_total', 'no').lower() == "yes":
+		munin.setOption('graph_total', 'Total')
 
 	# Fields
 	projects = getComposeContainers()
@@ -374,6 +388,8 @@ def funcComposeBlockIO():
 	munin.setOption('graph_title', 'Docker compose disk throughput')
 	munin.setOption('graph_args', '--base 1024')
 	munin.setOption('graph_vlabel', 'Bytes read (-) / write (+) per second')
+	if os.environ.get('graph_total', 'no').lower() == "yes":
+		munin.setOption('graph_total', 'Total')
 
 	# Fields
 	projects = getComposeContainers()
@@ -415,6 +431,8 @@ def funcComposeNetIO():
 	munin.setOption('graph_title', 'Docker compose traffic')
 	munin.setOption('graph_args', '--base 1000')
 	munin.setOption('graph_vlabel', 'Bits in (-) / out (+) per second')
+	if os.environ.get('graph_total', 'no').lower() == "yes":
+		munin.setOption('graph_total', 'Total')
 
 	# Fields
 	projects = getComposeContainers()

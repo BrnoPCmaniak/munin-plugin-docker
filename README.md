@@ -34,7 +34,7 @@
 ### Extra options: ###
 
 #### Truncate ####
-You can also enable or disable name truncation for blockio and netio graphs by adding a line into the `/etc/munin/plugin-conf.d/docker` file.
+You can also enable name truncation for blockio and netio graphs by adding a line into the `/etc/munin/plugin-conf.d/docker` file.
 
 ```
 [docker_*]
@@ -43,3 +43,12 @@ env.truncate yes
 ```
 
 This will lead into more readable graphs as the values will not be line wrapped under if the names of the containers are longer this comes with a cost of less readibility for the names of the containers.
+
+#### Total ####
+You can also enable showing sum of all values in graph by adding a line into the `/etc/munin/plugin-conf.d/docker` file.
+
+```
+[docker_*]
+user root
+env.total yes
+```
